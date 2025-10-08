@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>zNiine</title>
+  <style>
+    /*----------------------------------------
+      RESET + GLOBAL
+    ----------------------------------------*/
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+      line-height: 1.4;
+    }
+    a {
+      text-decoration: none;
+      color: inherit;
+    }
+
+    /*----------------------------------------
+      HEADER WITH LOGO + HAMBURGER
+    ----------------------------------------*/
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.5rem;
+      background: #fff;
+      border-bottom: 1px solid #ddd;
+      position: relative;
+      z-index: 10;
+    }
+    #logo {
+      font-size: 1.75rem;
+      font-weight: bold;
+      color: #007bff;
+    }
+
+    /* Hide desktop nav + search by default */
+    #desktop-nav {
+      display: none;
+    }
+    #search-inline {
+      display: none;
+    }
+
+    /* Hamburger button (visible on mobile) */
+    .hamburger {
+      width: 28px;
+      height: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      cursor: pointer;
+    }
+    .hamburger span {
+      display: block;
+      height: 3px;
+      background: #333;
+      border-radius: 2px;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+    /* When menu is open, transform the bars into an X */
+    .hamburger.open span:nth-child(1) {
+      transform: translateY(8px) rotate(45deg);
+    }
+    .hamburger.open span:nth-child(2) {
+      opacity: 0;
+    }
+    .hamburger.open span:nth-child(3) {
+      transform: translateY(-8px) rotate(-45deg);
+    }
+
+    /*----------------------------------------
+      SLIDING SIDE MENU (OFF-CANVAS)
+    ----------------------------------------*/
+    #side-menu {
+      position: fixed;
+      top: 0;
+      left: -260px;
+      width: 260px;
+      height: 100vh;
+      background: #fff;
+      box-shadow: 2px 0 8px rgba(0,0,0,0.1);
+      transition: left 0.3s ease;
+      z-index: 9;
+      /* push content down so it sits below the header */
+      padding-top: 4rem;
+      padding-left: 1rem;
+      padding-right: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    #side-menu.open {
+      left: 0;
+    }
+    #side-menu .menu-search {
+      display: flex;
+      gap: 0.5rem;
+    }
+    #side-menu input[type="text"] {
+      flex: 1;
+      padding: 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #side-menu button {
+      padding: 0.5rem 0.75rem;
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #side-menu nav ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    #side-menu nav a {
+      color: #333;
+      font-weight: 500;
+      padding: 0.25rem 0;
+    }
+    #side-menu nav a.active {
+      color: #007bff;
+      text-decoration: underline;
+    }
+
+    /*----------------------------------------
+      OVERLAY TO CLOSE MENU WHEN CLICKING OUTSIDE
+    ----------------------------------------*/
+    #overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.3);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      z-index: 8;
+    }
+    #overlay.visible {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    /*----------------------------------------
+      MAIN CONTAINER
+    ----------------------------------------*/
+    .container {
+      max-width: 1200px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+    }
+
+    /*----------------------------------------
+      HERO METRICS GRID
+    ----------------------------------------*/
+    #hero-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 1rem;
+    }
+    #hero-metrics .card {
+      background: #fff;
+      padding: 1rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+      text-align: center;
+    }
+    #hero-metrics .metric {
+      font-size: 1.75rem;
+      font-weight: bold;
+      color: #007bff;
+    }
+
+    /*----------------------------------------
+      MINI LEADERBOARDS
+    ----------------------------------------*/
+    #mini-leaderboards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    .mini-board {
+      background: #fff;
+      padding: 1rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+    .mini-board h4 {
+      margin-bottom: 0.75rem;
+      font-size: 1.1rem;
+      color: #007bff;
+    }
+    .mini-board table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .mini-board th, .mini-board td {
+      padding: 0.5rem;
+      border-bottom: 1px solid #eee;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+    .mini-board th {
+      font-weight: 600;
+    }
+    .mini-board .clickable {
+      color: #007bff;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    /*----------------------------------------
+      RECENT GAMES SECTION
+    ----------------------------------------*/
+    #recent-games {
+      margin-top: 2rem;
+    }
+    #recent-games h3 {
+      margin-bottom: 1rem;
+      color: #007bff;
+      font-size: 1.25rem;
+    }
+    #games-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+    .game-card {
+      background: #fff;
+      padding: 1rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+      cursor: pointer;
+      transition: transform .1s ease, box-shadow .1s ease;
+    }
+    .game-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .game-card h4 {
+      margin-bottom: 0.5rem;
+      font-size: 1.1rem;
+    }
+    .game-card p {
+      margin-bottom: 0.25rem;
+      font-size: 0.95rem;
+    }
+    .game-card strong {
+      font-size: 1.2rem;
+    }
+
+    /*----------------------------------------
+      MEDIA QUERIES (TABLET / MOBILE ADJUSTMENTS)
+    ----------------------------------------*/
+    @media (min-width: 768px) {
+      /* On wider screens, hide the hamburger & side-menu overlay, show normal top nav */
+      .hamburger {
+        display: none;
+      }
+      #side-menu {
+        display: none;
+      }
+      #overlay {
+        display: none;
+      }
+
+      /* Show the desktop‐style inline nav & search */
+      #desktop-nav {
+        display: flex;
+        gap: 2rem;
+      }
+      #desktop-nav a {
+        font-weight: 500;
+        color: #333;
+      }
+      #desktop-nav a.active {
+        color: #007bff;
+        text-decoration: underline;
+      }
+      #search-inline {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      #search-inline input[type="text"] {
+        padding: 0.5rem;
+        border: 1px solid #ccc;
+        border-radius: 4px 0 0 4px;
+        width: 200px;
+      }
+      #search-inline button {
+        padding: 0.5rem 1rem;
+        border: 1px solid #007bff;
+        background: #007bff;
+        color: #fff;
+        border-radius: 0 4px 4px 0;
+        cursor: pointer;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header>
+        <div id="logo">Santa Barbara</div>
+
+    <!-- DESKTOP NAVIGATION (shown @ ≥768px) -->
+    <div id="desktop-nav">
+      <a href="index.html" class="active">Home</a>
+      <a href="games.html">Games</a>
+      <a href="leaderboards.html">Leaderboards</a>
+      <a href="dong.html">Would it Dong?</a>
+    </div>
+
+    <!-- DESKTOP SEARCH (≥768px) -->
+    <form id="search-inline" onsubmit="event.preventDefault();">
+      <input type="text" placeholder="Search players, teams, umps…" list="suggestions-desktop" autocomplete="off" />
+      <button type="submit">Go</button>
+      <datalist id="suggestions-desktop"></datalist>
+    </form>
+
+    <!-- HAMBURGER BUTTON (for mobile) -->
+    <div class="hamburger" id="hamburger-btn">
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+  </header>
+
+  <!-- SIDE MENU (OFF-CANVAS) -->
+  <div id="side-menu">
+    <div class="menu-search">
+      <input type="text" id="mobile-search" placeholder="Search players, teams, umps…" list="suggestions-mobile" autocomplete="off" />
+      <button id="mobile-search-btn">Go</button>
+      <datalist id="suggestions-mobile"></datalist>
+    </div>
+    <nav>
+      <ul>
+        <li><a href="index.html" class="active">Home</a></li>
+        <li><a href="schedule.html">Standings</a></li>
+        <li><a href="games.html">Games</a></li>
+        <li><a href="leaderboards.html">Leaderboards</a></li>
+        <li><a href="park-factors.html">Park Factors</a></li>
+        <li><a href="fielding.html">Fielding</a></li>
+        <li><a href="stolen-bases.html">Base Running</a></li>
+        <li><a href="dong.html">Would it Dong?</a></li>
+<li><a href="https://zniine.github.io/Revs24/index.html">2024</a></li>
+      </ul>
+    </nav>
+  </div>
+
+  <!-- OVERLAY -->
+  <div id="overlay"></div>
+
+  <!-- MAIN CONTENT -->
+  <div class="container">
+
+    <!-- HERO METRICS -->
+    <section id="hero-metrics">
+      <div class="card">
+        <div class="metric" id="avg-ev">— mph</div>
+        <div>Avg Exit Velocity</div>
+      </div>
+      <div class="card">
+        <div class="metric" id="avg-angle">—°</div>
+        <div>Avg Launch Angle</div>
+      </div>
+      <div class="card">
+        <div class="metric" id="avg-hr-dist">— ft</div>
+        <div>Avg HR Distance</div>
+      </div>
+      <div class="card">
+        <div class="metric" id="avg-four">— mph</div>
+        <div>Avg Four-Seam Velocity</div>
+      </div>
+    </section>
+
+    <!-- MINI LEADERBOARDS -->
+    <section id="mini-leaderboards">
+   
+
+      <!-- Farthest Home Runs -->
+      <div class="mini-board">
+        <h4>Farthest Home Runs</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Batter</th>
+              <th>Dist</th>
+            </tr>
+          </thead>
+          <tbody id="lb-hr"></tbody>
+        </table>
+      </div>
+
+      <!-- Average Team Home Run Distance -->
+      <div class="mini-board">
+        <h4>Average Team Home Run Distance</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Team</th>
+              <th>Distance (FT)</th>
+            </tr>
+          </thead>
+          <tbody id="lb-pop"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- RECENT GAMES -->
+    <section id="recent-games">
+      <h3>Recent Trackman Game Uploads</h3>
+      <div id="games-container"></div>
+    </section>
+
+  </div>
+
+  <!-- DATA + RENDERING LOGIC -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <script>
+const data = [];   // this will hold only the columns you care about
+
+Papa.parse('./data.csv', {
+  download: true,
+  header: true,
+  skipEmptyLines: true,
+  step: ({ data: row }) => {
+    // pull out only the fields you actually use downstream:
+    data.push({
+            PitchCall:      row.PitchCall,      // ← include this!
+
+      ExitSpeed:      +row.ExitSpeed,
+      Angle:          +row.Angle,
+      Distance:       +row.Distance,
+      AutoPitchType:  row.AutoPitchType,
+      RelSpeed:       +row.RelSpeed,
+      Umpire:         row.Umpire,
+      PlateLocHeight: +row.PlateLocHeight,
+      PlateLocSide:   +row.PlateLocSide,
+      PlayResult:     row.PlayResult,
+      Batter:         row.Batter,
+      BatterTeam:     row.BatterTeam,
+      HomeNameFull:   row.HomeNameFull,
+      AwayNameFull:   row.AwayNameFull,
+      LocalDateTime:  row.LocalDateTime || row.Date,
+      GameUID:        row.GameUID,
+      RunsScored:     +row.RunsScored,
+  'Top/Bottom': row['Top/Bottom'],   // keep the slash in the key
+    });
+  },
+  complete: () => {
+    renderHeroMetrics();
+    renderMiniBoards();
+    populateSearchDatalists();
+    buildRecentGames();
+  }
+});
+
+    function renderHeroMetrics() {
+      const evs = data
+        .filter(r => r.PitchCall === 'InPlay' && !isNaN(+r.ExitSpeed))
+        .map(r => +r.ExitSpeed);
+      const angles = data
+        .filter(r => r.PitchCall === 'InPlay' && !isNaN(+r.Angle))
+        .map(r => +r.Angle);
+      const hrs = data
+        .filter(r => r.PlayResult === 'HomeRun' && !isNaN(+r.Distance))
+        .map(r => +r.Distance);
+      const fourSeamSpeeds = data
+        .filter(r => r.AutoPitchType === 'Four-Seam' && !isNaN(+r.RelSpeed))
+        .map(r => +r.RelSpeed);
+
+      document.getElementById('avg-ev').innerText = evs.length
+        ? (evs.reduce((a,b) => a + b, 0) / evs.length).toFixed(1) + ' mph'
+        : '—';
+      document.getElementById('avg-angle').innerText = angles.length
+        ? (angles.reduce((a,b) => a + b, 0) / angles.length).toFixed(1) + '°'
+        : '—';
+      document.getElementById('avg-hr-dist').innerText = hrs.length
+        ? (hrs.reduce((a,b) => a + b, 0) / hrs.length).toFixed(0) + ' ft'
+        : '—';
+      document.getElementById('avg-four').innerText = fourSeamSpeeds.length
+        ? (fourSeamSpeeds.reduce((a,b) => a + b, 0) / fourSeamSpeeds.length).toFixed(1) + ' mph'
+        : '—';
+    }
+
+    function renderMiniBoards() {
+      // 1) Top Umpires
+      
+
+      // 2) Farthest Home Runs
+      const hrBody = document.getElementById('lb-hr');
+      hrBody.innerHTML = '';
+      data
+        .filter(r => r.PlayResult === 'HomeRun' && !isNaN(parseFloat(r.Distance)))
+        .sort((a, b) => parseFloat(b.Distance) - parseFloat(a.Distance))
+        .slice(0, 3)
+        .forEach((r, i) => {
+          hrBody.insertAdjacentHTML('beforeend', `
+            <tr>
+              <td>${i+1}</td>
+              <td class="clickable" data-name="${r.Batter}">${r.Batter}</td>
+              <td>${parseFloat(r.Distance).toFixed(0)}</td>
+            </tr>
+          `);
+        });
+
+      // 3) Average HR Distance by Team
+      const teamMap = {};
+      data.forEach(r => {
+        if (r.PlayResult !== 'HomeRun') return;
+        const dist = parseFloat(r.Distance);
+        if (isNaN(dist)) return;
+        const teamFull = r.BatterTeam === r.HomeTeam
+          ? r.HomeNameFull
+          : r.AwayNameFull;
+        if (!teamMap[teamFull]) teamMap[teamFull] = { totalDist: 0, count: 0 };
+        teamMap[teamFull].totalDist += dist;
+        teamMap[teamFull].count++;
+      });
+      const avgTeamRows = Object.entries(teamMap)
+        .map(([team, stats]) => ({
+          Team: team,
+          AvgDistance: stats.totalDist / stats.count
+        }))
+        .sort((a, b) => b.AvgDistance - a.AvgDistance)
+        .slice(0, 3);
+
+      const teamBody = document.getElementById('lb-pop');
+      teamBody.innerHTML = '';
+      avgTeamRows.forEach((r, i) => {
+        teamBody.insertAdjacentHTML('beforeend', `
+          <tr>
+            <td>${i+1}</td>
+            <td>${r.Team}</td>
+            <td>${r.AvgDistance.toFixed(1)}</td>
+          </tr>
+        `);
+      });
+
+      // Attach click handlers (only for umps and batters)
+      document.querySelectorAll('.mini-board .clickable').forEach(td => {
+        td.addEventListener('click', () => {
+          const name = td.dataset.name;
+          const isUmp = td.closest('#lb-ump') !== null;
+          const url = isUmp
+            ? `ump-profiles.html?player=${encodeURIComponent(name)}`
+            : `batter-profiles.html?player=${encodeURIComponent(name)}`;
+          window.location.href = url;
+        });
+      });
+    }
+
+    function populateSearchDatalists() {
+      // Collect unique names
+      const batters  = new Set(data.map(r => r.Batter));
+      const pitchers = new Set(data.map(r => r.Pitcher));
+      const umps     = new Set(data.map(r => r.Umpire));
+      const teams    = new Set([
+        ...data.map(r => r.HomeNameFull),
+        ...data.map(r => r.AwayNameFull)
+      ]);
+
+      function addOption(dlElem, label, url) {
+        const opt = document.createElement('option');
+        opt.value      = label;
+        opt.dataset.url = url;
+        dlElem.appendChild(opt);
+      }
+
+      const dlMobile  = document.getElementById('suggestions-mobile');
+      const dlDesktop = document.getElementById('suggestions-desktop');
+      [dlMobile, dlDesktop].forEach(dl => dl.innerHTML = '');
+
+      // 1) Umpires
+      umps.forEach(name => {
+        const url = `ump-profiles.html?player=${encodeURIComponent(name)}`;
+        addOption(dlMobile, `${name} (Umpire)`, url);
+        addOption(dlDesktop, `${name} (Umpire)`, url);
+      });
+
+      // 2) Batters vs Pitchers
+      const allPlayers = new Set([...batters, ...pitchers]);
+      allPlayers.forEach(name => {
+        const isB = batters.has(name);
+        const isP = pitchers.has(name);
+        if (isB && isP) {
+          const urlB = `batter-profiles.html?player=${encodeURIComponent(name)}`;
+          const urlP = `pitcher-profiles.html?player=${encodeURIComponent(name)}`;
+          addOption(dlMobile, `${name} (Batter)`, urlB);
+          addOption(dlMobile, `${name} (Pitcher)`, urlP);
+          addOption(dlDesktop, `${name} (Batter)`, urlB);
+          addOption(dlDesktop, `${name} (Pitcher)`, urlP);
+        } else if (isB) {
+          const urlB = `batter-profiles.html?player=${encodeURIComponent(name)}`;
+          addOption(dlMobile, name, urlB);
+          addOption(dlDesktop, name, urlB);
+        } else {
+          const urlP = `pitcher-profiles.html?player=${encodeURIComponent(name)}`;
+          addOption(dlMobile, name, urlP);
+          addOption(dlDesktop, name, urlP);
+        }
+      });
+
+      // 3) Teams
+      teams.forEach(name => {
+        const url = `team-profiles.html?team=${encodeURIComponent(name)}`;
+        addOption(dlMobile, name, url);
+        addOption(dlDesktop, name, url);
+      });
+    }
+
+    function buildRecentGames() {
+      const games = {};
+      data.forEach(r => {
+        const id = r.GameUID;
+        if (!id) return;
+        if (!games[id]) {
+          games[id] = {
+            date: r.LocalDateTime || r.Date,
+            away: r.AwayNameFull,
+            home: r.HomeNameFull,
+            awayRuns: 0,
+            homeRuns: 0
+          };
+        }
+        const runs = +r.RunsScored || 0;
+        if (runs) {
+          if (r['Top/Bottom'] === 'Top')   games[id].awayRuns += runs;
+          else                             games[id].homeRuns += runs;
+        }
+      });
+      const recent = Object.entries(games)
+        .map(([gameUID, g]) => ({ gameUID, ...g }))
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .slice(0, 6);
+
+      const container = document.getElementById('games-container');
+      container.innerHTML = '';
+      recent.forEach(g => {
+        const card = document.createElement('div');
+        card.className = 'game-card';
+        card.innerHTML = `
+          <h4>${new Date(g.date).toLocaleDateString()}</h4>
+          <p>${g.away} @ ${g.home}</p>
+          <p><strong>${g.awayRuns} - ${g.homeRuns}</strong></p>
+        `;
+        card.addEventListener('click', () => {
+          window.location.href = `./Game-view.html?gameUID=${g.gameUID}`;
+        });
+        container.appendChild(card);
+      });
+    }
+
+    // HANDLE SEARCH FORM SUBMITS
+    document.getElementById('mobile-search-btn').addEventListener('click', () => {
+      const input = document.getElementById('mobile-search');
+      const q = input.value.trim();
+      if (!q) return;
+      const opts = Array.from(document.getElementById('suggestions-mobile').options);
+      const match = opts.find(o => o.value === q);
+      if (match && match.dataset.url) {
+        window.location.href = match.dataset.url;
+      } else {
+        alert('No matching player, umpire, or team found.');
+      }
+    });
+    // DESKTOP SEARCH EVENT
+    document.querySelector('#search-inline button').addEventListener('click', () => {
+      const input = document.querySelector('#search-inline input[type="text"]');
+      const q = input.value.trim();
+      if (!q) return;
+      const opts = Array.from(document.getElementById('suggestions-desktop').options);
+      const match = opts.find(o => o.value === q);
+      if (match && match.dataset.url) {
+        window.location.href = match.dataset.url;
+      } else {
+        alert('No matching player, umpire, or team found.');
+      }
+    });
+  </script>
+
+  <!-- FIREBASE AUTH (unchanged) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-app.js";
+    import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-analytics.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBgBqrrRBB1vvAnQ9mNBt9Vq6p2NWeKYZw",
+      authDomain: "revs-2c987.firebaseapp.com",
+      projectId: "revs-2c987",
+      storageBucket: "revs-2c987.firebasestorage.app",
+      messagingSenderId: "181256684157",
+      appId: "1:181256684157:web:a9e1c5dfd767658e2ba714",
+      measurementId: "G-2050889X0C"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const analytics = getAnalytics(app);
+    firebase.initializeApp(firebaseConfig);
+  </script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const auth = firebase.auth();
+      auth.onAuthStateChanged(user => {
+        if (!user) {
+          window.location.href = 'login.html';
+        }
+      });
+    });
+
+    // MENU TOGGLE LOGIC
+    const hamburger = document.getElementById('hamburger-btn');
+    const sideMenu  = document.getElementById('side-menu');
+    const overlay   = document.getElementById('overlay');
+
+    function openMenu() {
+      hamburger.classList.add('open');
+      sideMenu.classList.add('open');
+      overlay.classList.add('visible');
+    }
+    function closeMenu() {
+      hamburger.classList.remove('open');
+      sideMenu.classList.remove('open');
+      overlay.classList.remove('visible');
+    }
+
+    hamburger.addEventListener('click', () => {
+      if (sideMenu.classList.contains('open')) {
+        closeMenu();
+      } else {
+        openMenu();
+      }
+    });
+    overlay.addEventListener('click', closeMenu);
+  </script>
+</body>
+</html>

@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Batter Scouting Reports</title>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+    <style>
+        body { font-family: sans-serif; margin: 1rem; }
+        select { font-size: 1rem; margin-bottom: 1rem; }
+        .flex-row { display: flex; gap: 1rem; }
+        .chart-box {
+            border: 1px solid #eee;
+            background: #fafafa;
+            position: relative;
+            overflow: hidden; /* Important for Plotly to not overflow */
+        }
+        .approach-box { flex: 2; height: 320px; }
+        .spray-box {
+            flex: 1;
+            height: 320px; /* Fixed height for Plotly container */
+            min-width: 300px; /* Ensure a minimum width for the plot */
+            box-sizing: border-box; /* Include padding and border in sizing */
+        }
+        .legend {
+            position: absolute;
+            bottom: 4px;
+            left: 4px; /* For approach legend */
+            background: rgba(255,255,255,0.8);
+            font-size: 0.9rem;
+            padding: 4px;
+            border: 1px solid #ccc;
+            z-index: 10; /* Ensure legend is above plot */
+        }
+        .spray-legend { /* Specific style for spray chart legend */
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            background: rgba(255,255,255,0.8);
+            font-size: 0.9rem;
+            padding: 4px;
+            border: 1px solid #ccc;
+            z-index: 10;
+        }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: 0.85rem; }
+        th, td { border: 1px solid #ccc; padding: 0.2rem 0.4rem; text-align: center; }
+        .report-page { page-break-after: always; border: 1px solid #ccc; padding: 1rem; margin-bottom: 2rem; }
+        .report-header { font-size: 1.5rem; margin-bottom: .5rem; }
+    </style>
+</head>
+<body>
+    <label>Select Team:
+        <select id="teamSelect"><option value="">-- pick a team --</option></select>
+    </label>
+    <div id="reports"></div>
+
+    <script>
+    // Global data variable
+    window._data = [];
+
+    // 1) Load CSV
+    Papa.parse('data.csv', {
+        header: true,
+        download: true,
+        complete: results => {
+            window._data = results.data;
+            initTeamPicker();
+        },
+        error: (err, file) => {
+            console.error("Error parsing CSV:", err, file);
+            alert("Failed to load data.csv. Please ensure it's in the same directory.");
+        }
+    });
+
+    // 2) Populate team dropdown
+    function initTeamPicker() {
+        const sel = document.getElementById('teamSelect');
+        // Filter out rows where BatterTeam might be empty or null
+        const teams = Array.from(new Set(_data.map(r => r.BatterTeam).filter(Boolean))).sort();
+        if (teams.length === 0) {
+            console.warn("No teams found in data.csv. Is 'BatterTeam' column correct?");
+            sel.innerHTML = '<option value="">-- No teams found --</option>';
+            return;
+        }
+
+        teams.forEach(t => {
+            const o = document.createElement('option');
+            o.value = t; o.textContent = t;
+            sel.appendChild(o);
+        });
+        sel.addEventListener('change', () => buildReports(sel.value));
+    }
+
+    // 3) Build reports
+    function buildReports(team) {
+        const container = document.getElementById('reports');
+        container.innerHTML = ''; // Clear existing reports
+        if (!team) return;
+
+        const teamRows = _data.filter(r => r.BatterTeam === team);
+        const batters = Array.from(new Set(teamRows.map(r => r.Batter).filter(Boolean))).sort();
+
+        if (batters.length === 0) {
+            container.innerHTML = `<p>No batter data found for team: ${team}</p>`;
+            return;
+        }
+
+        batters.forEach(batter => {
+            ['Left', 'Right'].forEach(side => {
+                const vs = teamRows.filter(r => r.Batter === batter && r.PitcherThrows === side);
+                if (!vs.length) return; // Skip if no data for this batter vs this pitcher side
+
+                // Generate unique IDs for the charts within this page *before* rendering the page
+                const base = (batter + '-' + side)
+                    .replace(/\s+/g, '_')
+                    .replace(/[^A-Za-z0-9_-]/g, '');
+                const approachId = `approach_${base}`;
+                const sprayId = `spray_chart_${base}`; // Use a clear ID for Plotly
+
+                const page = renderBatterPage(batter, side, vs, approachId, sprayId);
+                container.appendChild(page); // Append the page to the DOM FIRST
+
+                // Render charts AFTER the page is in the DOM
+                // Approach chart
+                renderApproachByCount(vs, approachId);
+                // Spray chart
+                renderSprayChart(vs, sprayId);
+            });
+        });
+    }
+
+    function renderBatterPage(name, side, rows, approachId, sprayId) {
+        // Page wrapper
+        const page = document.createElement('div');
+        page.className = 'report-page';
+        page.innerHTML = `<div class="report-header">${name} vs. ${side === 'Left' ? 'LHP' : 'RHP'}</div>`;
+
+        // Tables
+        const pitchTypeMetrics = computePitchTypeMetrics(rows);
+        const countSummary = computeCountSummary(rows);
+        const tablesWrapper = document.createElement('div');
+        tablesWrapper.style.display = 'flex';
+        tablesWrapper.style.gap = '1rem';
+        tablesWrapper.style.marginBottom = '1rem';
+        const csTable = renderCountSummaryTable(countSummary);
+        csTable.style.width = '48%';
+        const ptTable = renderPitchTypeTable(pitchTypeMetrics);
+        ptTable.style.width = '45%'; // Adjusted width for better fit
+        tablesWrapper.append(csTable, ptTable);
+        page.appendChild(tablesWrapper);
+
+        // Chart row
+        const charts = document.createElement('div');
+        charts.className = 'flex-row';
+
+        // Approach chart container
+        const appDiv = document.createElement('div');
+        appDiv.id = approachId;
+        appDiv.className = 'chart-box approach-box';
+
+        // Spray chart container
+        const sprayDiv = document.createElement('div');
+        sprayDiv.id = sprayId; // Assign the ID here for Plotly to find it
+        sprayDiv.className = 'chart-box spray-box';
+
+        // No canvas element needed for Plotly spray chart, it draws directly into the div
+        charts.append(appDiv, sprayDiv);
+        page.appendChild(charts);
+
+        return page;
+    }
+
+    // --- Metrics and rendering functions below ---
+
+    function computeCountSummary(rows) {
+        const byC = {};
+        rows.forEach(r => {
+            const key = `${r.Balls}-${r.Strikes}`;
+            if (!byC[key]) byC[key] = { seen:0, ooz:0, sw:0, chase:0, wh:0 };
+            const m = byC[key]; m.seen++;
+            const side = parseFloat(r.PlateLocSide), ht = parseFloat(r.PlateLocHeight);
+            // Ensure values are numbers before comparison
+            if (isNaN(side) || isNaN(ht)) return;
+
+            const inZone = side >= -0.85 && side <= 0.85 && ht >= 1.5 && ht <= 3.5;
+            if (!inZone) m.ooz++;
+            const swung = !['BallCalled','StrikeCalled'].includes(r.PitchCall);
+            if (swung) {
+                m.sw++;
+                if (r.PitchCall === 'StrikeSwinging') m.wh++;
+                if (!inZone) m.chase++;
+            }
+        });
+
+        // Filter out counts with 0 pitches seen before mapping
+        return Object.entries(byC)
+            .filter(([,m]) => m.seen > 0)
+            .map(([cnt,m]) => ({
+                Count:cnt,
+                PitchesSeen:m.seen,
+                InZone:((m.seen - m.ooz) / m.seen * 100).toFixed(1) + '%',
+                Swing:(m.sw / m.seen * 100).toFixed(1) + '%',
+                Chase:(m.ooz > 0 ? (m.chase / m.ooz * 100).toFixed(1) + '%' : '-'),
+                Whiff:(m.sw > 0 ? (m.wh / m.sw * 100).toFixed(1) + '%' : '-')
+            }));
+    }
+
+    function renderCountSummaryTable(data) {
+        data.sort((a,b)=>{
+            const [b1,s1]=a.Count.split('-').map(Number), [b2,s2]=b.Count.split('-').map(Number);
+            return b1!==b2? b1-b2 : s1-s2;
+        });
+        const tbl = document.createElement('table');
+        tbl.innerHTML = `
+            <thead><tr>
+                <th>Count</th><th>Pitches Seen</th><th>InZone%</th><th>Swing%</th><th>Chase%</th><th>Whiff%</th>
+            </tr></thead>
+            <tbody>` + data.map(r=>`
+                <tr>
+                    <td>${r.Count}</td>
+                    <td>${r.PitchesSeen}</td>
+                    <td>${r.InZone}</td>
+                    <td>${r.Swing}</td>
+                    <td>${r.Chase}</td>
+                    <td>${r.Whiff}</td>
+                </tr>`).join('') + `
+            </tbody>
+        `;
+        return tbl;
+    }
+
+    function computePitchTypeMetrics(rows) {
+        const total = rows.length;
+        const byType = {};
+        rows.forEach(r => {
+            const t = r.AutoPitchType || 'Unknown'; // Default to 'Unknown' if type is missing
+            if (!byType[t]) byType[t] = { cnt:0, ab:0, hits:0, TB:0, evSum:0,evCount:0, laSum:0,laCount:0, swings:0, whiffs:0, ooz:0, chase:0 };
+            const m = byType[t]; m.cnt++;
+
+            const swung = !['BallCalled','StrikeCalled'].includes(r.PitchCall);
+            const side = parseFloat(r.PlateLocSide), ht = parseFloat(r.PlateLocHeight);
+            if (isNaN(side) || isNaN(ht)) { /* Skip zone calculation if invalid */ } else {
+                const inZone = side >= -0.85 && side <= 0.85 && ht >= 1.5 && ht <= 3.5;
+                if (!inZone) { m.ooz++; if(swung) m.chase++; }
+            }
+
+            if (r.KorBB !== 'Walk') {
+                m.ab++;
+                if(/Single|Double|Triple|HomeRun/.test(r.PlayResult)) {
+                    m.hits++;
+                    m.TB += {'Single':1,'Double':2,'Triple':3,'HomeRun':4}[r.PlayResult] || 0;
+                }
+            }
+            const ev=parseFloat(r.ExitSpeed); if(!isNaN(ev)){m.evSum+=ev;m.evCount++;}
+            const la=parseFloat(r.Angle); if(!isNaN(la)){m.laSum+=la;m.laCount++;}
+            if(swung){m.swings++; if(r.PitchCall==='StrikeSwinging') m.whiffs++;}
+        });
+
+        const metrics = Object.entries(byType).map(([type,m]) => ({
+            AutoPitchType:type,
+            pct:(m.cnt / total * 100).toFixed(1) + '%',
+            AVG:m.ab > 0 ? (m.hits / m.ab).toFixed(3).substring(1) : '-',
+            SLG:m.ab > 0 ? (m.TB / m.ab).toFixed(3).substring(1) : '-',
+            ExitVelo:m.evCount > 0 ? (m.evSum / m.evCount).toFixed(1) : '-',
+            LA:m.laCount > 0 ? (m.laSum / m.laCount).toFixed(1) : '-',
+            Swing:m.cnt > 0 ? (m.swings / m.cnt * 100).toFixed(1) + '%' : '-',
+            Chase:m.ooz > 0 ? (m.chase / m.ooz * 100).toFixed(1) + '%' : '-',
+            Whiff:m.swings > 0 ? (m.whiffs / m.swings * 100).toFixed(1) + '%' : '-'
+        }));
+
+        // Calculate total row manually for AVG and ExitVelo from original rows
+        const totalAB = rows.filter(r => r.KorBB !== 'Walk').length;
+        const totalHits = rows.filter(r => /Single|Double|Triple|HomeRun/.test(r.PlayResult) && r.KorBB !== 'Walk').length;
+        const totalExitVelos = rows.map(r => parseFloat(r.ExitSpeed)).filter(v => !isNaN(v));
+        const totalLA = rows.map(r => parseFloat(r.Angle)).filter(v => !isNaN(v));
+        const totalSwings = rows.filter(r => !['BallCalled','StrikeCalled'].includes(r.PitchCall)).length;
+        const totalWhiffs = rows.filter(r => r.PitchCall === 'StrikeSwinging').length;
+        const totalOoz = rows.filter(r => {
+            const side = parseFloat(r.PlateLocSide), ht = parseFloat(r.PlateLocHeight);
+            return !isNaN(side) && !isNaN(ht) && !(side >= -0.85 && side <= 0.85 && ht >= 1.5 && ht <= 3.5);
+        }).length;
+        const totalChase = rows.filter(r => {
+            const side = parseFloat(r.PlateLocSide), ht = parseFloat(r.PlateLocHeight);
+            const swung = !['BallCalled','StrikeCalled'].includes(r.PitchCall);
+            return swung && !isNaN(side) && !isNaN(ht) && !(side >= -0.85 && side <= 0.85 && ht >= 1.5 && ht <= 3.5);
+        }).length;
+
+        metrics.push({
+            AutoPitchType: 'Total',
+            pct: '100.0%',
+            AVG: totalAB > 0 ? (totalHits / totalAB).toFixed(3).substring(1) : '-',
+            SLG: '-', // SLG needs individual base values, not just total TB, more complex to total here
+            ExitVelo: totalExitVelos.length > 0 ? (totalExitVelos.reduce((a,b) => a+b, 0) / totalExitVelos.length).toFixed(1) : '-',
+            LA: totalLA.length > 0 ? (totalLA.reduce((a,b) => a+b, 0) / totalLA.length).toFixed(1) : '-',
+            Swing: total > 0 ? (totalSwings / total * 100).toFixed(1) + '%' : '-',
+            Chase: totalOoz > 0 ? (totalChase / totalOoz * 100).toFixed(1) + '%' : '-',
+            Whiff: totalSwings > 0 ? (totalWhiffs / totalSwings * 100).toFixed(1) + '%' : '-'
+        });
+
+        return metrics;
+    }
+
+
+    function renderPitchTypeTable(data) {
+        const tbl=document.createElement('table');
+        tbl.innerHTML = `
+            <thead><tr><th>Type</th><th>%</th><th>AVG</th><th>SLG</th><th>ExitVelo</th><th>LA</th><th>Swing</th><th>Chase</th><th>Whiff</th></tr></thead>
+            <tbody>` + data.map(r=>`
+                <tr><td>${r.AutoPitchType}</td><td>${r.pct}</td><td>${r.AVG}</td><td>${r.SLG}</td><td>${r.ExitVelo}</td><td>${r.LA}</td><td>${r.Swing}</td><td>${r.Chase}</td><td>${r.Whiff}</td></tr>`).join('') + `
+            </tbody>
+        `;
+        return tbl;
+    }
+
+    // Helper to convert baseball (distance, direction) to Cartesian (x, y)
+    function polarToCartesian(distance, direction, scaleFactor) {
+        // direction: -45 (Left Field) to 45 (Right Field), 0 (Center Field)
+        // Convert to radians, adjusting 0 (center field) to be along the positive Y-axis
+        // and positive angles to the right (positive X), negative to the left (negative X).
+        const angleRad = (90 - direction) * Math.PI / 180;
+
+        const x = distance * Math.cos(angleRad) * scaleFactor;
+        const y = distance * Math.sin(angleRad) * scaleFactor;
+        return { x, y };
+    }
+
+    // Function to render the spray chart using Plotly
+    function renderSprayChart(rows, containerId) {
+        const container = document.getElementById(containerId);
+        if (!container) {
+            console.error(`Plotly spray chart container not found: ${containerId}`);
+            return;
+        }
+        container.innerHTML = ''; // Clear previous chart content
+
+        // Filter for in-play balls only with valid numeric distance/direction
+        const inPlayRows = rows.filter(r =>
+            r.PitchCall === 'InPlay' &&
+            !isNaN(parseFloat(r.Distance)) && parseFloat(r.Distance) > 0 &&
+            !isNaN(parseFloat(r.Direction))
+        );
+
+        // --- CALIBRATION PARAMETERS ---
+        // These values need to be adjusted based on your 'baseball_field.png' image
+        // and how you want the hits to be scaled and positioned on it.
+
+        // Maximum expected distance of a hit (e.g., beyond the deepest fence) in feet
+        const MAX_FIELD_DISTANCE_FEET = 420; // Example: Max distance on your field image
+
+        // Plotly container dimensions (taken from its actual rendered size)
+        const PLOTLY_CONTAINER_WIDTH = container.offsetWidth;
+        const PLOTLY_CONTAINER_HEIGHT = container.offsetHeight;
+
+        // Scale factor to convert feet to pixels for the plot.
+        // This maps the MAX_FIELD_DISTANCE_FEET to a significant portion of the plot's height.
+        // Adjust the '0.9' to give more or less margin at the top.
+        const scaleFactor = (PLOTLY_CONTAINER_HEIGHT * 0.9) / MAX_FIELD_DISTANCE_FEET;
+
+        // Determine axis ranges for Plotly based on the maximum distance and scale.
+        // X_RANGE_MAX covers the width from left foul to right foul.
+        // Assuming a 90-degree spread (45 deg left to 45 deg right) for simplicity.
+        const X_RANGE_MAX_FEET = MAX_FIELD_DISTANCE_FEET * Math.sin(45 * Math.PI / 180); // Distance to foul pole at max range
+        const Y_RANGE_MAX_FEET = MAX_FIELD_DISTANCE_FEET; // Distance straight to center field
+
+        const X_PLOT_RANGE = X_RANGE_MAX_FEET * scaleFactor * 1.05; // 1.05 for a small buffer
+        const Y_PLOT_RANGE = Y_RANGE_MAX_FEET * scaleFactor * 1.05; // 1.05 for a small buffer
+
+        // Data preparation
+        const scatterPoints = inPlayRows.map(r => {
+            const distance = parseFloat(r.Distance);
+            const direction = parseFloat(r.Direction);
+            const coords = polarToCartesian(distance, direction, scaleFactor);
+
+            let markerColor;
+            let markerOpacity = 0.7;
+            switch (r.PlayResult) {
+                case 'HomeRun': markerColor = 'rgba(255, 165, 0, ' + markerOpacity + ')'; break; // Orange
+                case 'Triple':  markerColor = 'rgba(128, 0, 128, ' + markerOpacity + ')'; break; // Purple
+                case 'Double':  markerColor = 'rgba(255, 255, 0, ' + markerOpacity + ')'; break; // Yellow
+                case 'Single':  markerColor = 'rgba(0, 128, 0, ' + markerOpacity + ')'; break; // Green
+                case 'Out':     markerColor = 'rgba(255, 0, 0, ' + markerOpacity + ')'; break; // Red
+                default:        markerColor = 'rgba(0, 0, 255, ' + markerOpacity + ')'; break; // Blue for other hits/in-play
+            }
+
+            return {
+                x: coords.x,
+                y: coords.y,
+                text: `Result: ${r.PlayResult || 'In Play'}<br>Distance: ${distance} ft<br>Direction: ${direction}°<br>Exit Velo: ${r.ExitSpeed || '-'}<br>Launch Angle: ${r.Angle || '-'}`,
+                marker: {
+                    color: markerColor,
+                    size: 8, // Adjust size as needed
+                    line: {
+                        color: 'black',
+                        width: 0.5
+                    }
+                }
+            };
+        });
+
+        const data = [{
+            x: scatterPoints.map(p => p.x),
+            y: scatterPoints.map(p => p.y),
+            mode: 'markers',
+            type: 'scatter',
+            hoverinfo: 'text',
+            marker: {
+                color: scatterPoints.map(p => p.marker.color),
+                size: scatterPoints.map(p => p.marker.size),
+                line: {
+                    color: 'black',
+                    width: 0.5
+                }
+            }
+        }];
+
+        const layout = {
+            // title: 'Spray Chart', // Optional title
+            xaxis: {
+                range: [-X_PLOT_RANGE, X_PLOT_RANGE],
+                showgrid: false,
+                zeroline: false,
+                visible: false // Hide x-axis ticks and labels
+            },
+            yaxis: {
+                range: [0, Y_PLOT_RANGE], // Home plate at y=0, increasing outwards
+                showgrid: false,
+                zeroline: false,
+                visible: false // Hide y-axis ticks and labels
+            },
+            images: [{
+                // **CRITICAL**: Make sure this path is correct relative to your HTML file!
+                source: "baseball_field.png",
+                xref: "x",
+                yref: "y",
+                x: -X_PLOT_RANGE, // Image X start (left edge of Plotly's x-axis)
+                y: Y_PLOT_RANGE,  // Image Y start (top edge of Plotly's y-axis)
+                sizex: 2 * X_PLOT_RANGE, // Image width to cover the full X range
+                sizey: Y_PLOT_RANGE, // Image height to cover the full Y range
+                sizing: "stretch", // Stretch image to fit the defined size
+                layer: "below" // Place image below scatter points
+            }],
+            margin: { t: 10, b: 10, l: 10, r: 10 }, // Minimal margins
+            height: PLOTLY_CONTAINER_HEIGHT,
+            width: PLOTLY_CONTAINER_WIDTH,
+            hovermode: 'closest',
+            showlegend: false, // We'll create a custom legend
+            paper_bgcolor: 'rgba(0,0,0,0)', // Transparent background for the plot area
+            plot_bgcolor: 'rgba(0,0,0,0)'  // Transparent background for the plotting area
+        };
+
+        Plotly.newPlot(containerId, data, layout, {displayModeBar: false});
+
+        // Add custom legend for hit types
+        const legendDiv = document.createElement('div');
+        legendDiv.className = 'spray-legend'; // Use the specific spray-legend class
+        legendDiv.innerHTML = `
+            <div><span style="display:inline-block;width:12px;height:12px;background-color:rgba(0,0,255,0.7);-webkit-print-color-adjust:exact;print-color-adjust:exact"></span> Other In Play</div>
+            <div><span style="display:inline-block;width:12px;height:12px;background-color:rgba(255,0,0,0.7);-webkit-print-color-adjust:exact;print-color-adjust:exact"></span> Out</div>
+            <div><span style="display:inline-block;width:12px;height:12px;background-color:rgba(255,165,0,0.8);-webkit-print-color-adjust:exact;print-color-adjust:exact"></span> Home Run</div>
+            <div><span style="display:inline-block;width:12px;height:12px;background-color:rgba(0,128,0,0.7);-webkit-print-color-adjust:exact;print-color-adjust:exact"></span> Single</div>
+            <div><span style="display:inline-block;width:12px;height:12px;background-color:rgba(255,255,0,0.7);-webkit-print-color-adjust:exact;print-color-adjust:exact"></span> Double</div>
+            <div><span style="display:inline-block;width:12px;height:12px;background-color:rgba(128,0,128,0.7);-webkit-print-color-adjust:exact;print-color-adjust:exact"></span> Triple</div>
+        `;
+        container.appendChild(legendDiv);
+    }
+
+
+    function renderApproachByCount(rows, containerId) {
+        const tree={}; rows.forEach(r=>{
+            const key=`${r.Balls}-${r.Strikes}`;
+            const action=['BallCalled','StrikeCalled'].includes(r.PitchCall)?'Take':'Swing';
+            tree[key]=tree[key]||{Take:0,Swing:0}; tree[key][action]++;
+        });
+        const cont=document.getElementById(containerId);
+        if(!cont) {
+            console.error(`Plotly approach chart container not found: ${containerId}`);
+            return;
+        }
+        cont.innerHTML=''; cont.style.position='relative';
+        const pairs=Object.keys(tree).map(k=>k.split('-').map(Number));
+        const maxTier=pairs.reduce((mx,[b,s])=>Math.max(mx,b+s),0);
+        const BOX=55,XSP=55,YSP=55;
+        for(let sum=0;sum<=maxTier;sum++){
+            const tier=[]; for(let b=0;b<=3;b++){const s=sum-b; if(s<0||s>2)continue; tier.push({b,s,counts:tree[`${b}-${s}`]||{Take:0,Swing:0}});} tier.sort((a,b)=>b.b-a.b);
+            const rowWidth=(tier.length-1)*XSP+BOX;
+            const startX=(cont.clientWidth-rowWidth)/4; // Adjusted to center better
+            tier.forEach((cell,i)=>{
+                const wrap=document.createElement('div'); wrap.style.cssText=`position:absolute;left:${startX+i*XSP}px;top:${sum*YSP}px;width:${BOX}px;height:${BOX}px;color:white;text-align:center;`;
+                cont.appendChild(wrap);
+                Plotly.newPlot(wrap,[{type:'pie',hole:0,labels:['Take','Swing'],values:[cell.counts.Take,cell.counts.Swing],textinfo:[],marker:{colors:['green','blue']},domain:{x:[0,1],y:[0,1]}}],{showlegend:false,margin:{t:0,b:0,l:0,r:0},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)'},{displayModeBar:false});
+                const lbl=document.createElement('div'); lbl.innerHTML=`${cell.b}-${cell.s}<br>${cell.counts.Take+cell.counts.Swing}`;
+                lbl.style.cssText='position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:10px;pointer-events:none;'; wrap.appendChild(lbl);
+            });
+        }
+        const legend=document.createElement('div'); legend.className='legend'; legend.innerHTML=`<div><span style="display:inline-block;width:12px;height:12px;background-color:green;‑webkit-print-color-adjust:exact;print-color-adjust:exact"></span>Take</div><div><span style="display:inline-block;width:12px;height:12px;background-color:blue;‑webkit-print-color-adjust:exact;print-color-adjust:exact"></span>Swing</div>`;
+        cont.appendChild(legend);
+    }
+    </script>
+</body>
+</html>

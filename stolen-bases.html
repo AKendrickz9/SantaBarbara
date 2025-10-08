@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
+
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stealing Stats Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+    #menu { background: #444; }
+    #menu ul { list-style: none; margin: 0; padding: 0; display: flex; }
+    #menu li { margin: 0; }
+    #menu a { display: block; padding: 1rem; color: #fff; text-decoration: none; }
+    #menu a.active, #menu a:hover { background: #666; }
+    header { background: #333; color: #fff; padding: 1rem; text-align: center; }
+    .submenu { display: flex; gap: 1rem; padding: 0.5rem 1rem; background: #ddd; }
+    .submenu button { padding: 0.5rem 1rem; cursor: pointer; background: #fff; border: 1px solid #ccc; }
+    .submenu button:hover { background: #eee; }
+    .filters { display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem; background: #f4f4f4; }
+    .filters label { display: flex; flex-direction: column; font-size: 0.9rem; }
+    #note { margin: 0.5rem 1rem; color: red; font-weight: bold; }
+    .hidden { display: none; }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    th, td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
+    th { background: #eee; position: sticky; top: 0; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <nav id="menu">
+    <ul>
+      <li><a href="index.html" >Home</a></li>
+                          <li><a href="schedule.html" >Standings</a></li>
+
+                        <li><a href="games.html">Games</a></li>
+
+      <li><a href="leaderboards.html">Leaderboards</a></li>
+      <li><a href="park-factors.html">Park Factors</a></li>
+      <li><a href="fielding.html">Fielding</a></li>
+      <li><a href="stolen-bases.html" class="active">Base Running</a></li>
+            <li><a href="dong.html">Would it Dong?</a></li>
+
+    </ul>
+  </nav>
+
+  <header><h1>Stealing Stats Dashboard</h1></header>
+
+  <div class="submenu">
+    <button id="btnStats">Steals Stats Table</button>
+    <button id="btnCount">Attempts By Count</button>
+  </div>
+
+  <section id="statsSection">
+    <div class="filters">
+      <label>Batting Team:
+        <select id="battingTeamFilter"><option value="">All</option></select>
+      </label>
+      <label>Defensive Team:
+        <select id="defenseTeamFilter"><option value="">All</option></select>
+      </label>
+      <label>Pitcher Filter:
+        <select id="pitcherFilter"><option value="">All</option></select>
+      </label>
+      <label>Catcher Filter:
+        <select id="catcherFilter"><option value="">All</option></select>
+      </label>
+      <label>Minimum Attempts:
+        <input type="number" id="minAttempts" value="0" min="0" />
+      </label>
+      <label>View Mode:
+        <select id="viewMode">
+          <option value="steal">Steal % by Runner</option>
+          <option value="throw">Caught % by Catcher</option>
+        </select>
+      </label>
+    </div>
+    <div id="note"></div>
+    <table id="statsTable">
+      <thead><tr id="tableHeader"></tr></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </section>
+
+  <section id="countSection" class="hidden">
+    <div class="filters">
+      <label>Batting Team:
+        <select id="battingTeamCountFilter"><option value="" disabled selected>Select Team</option></select>
+      </label>
+    </div>
+    <table id="countTable">
+      <thead><tr id="countHeader"></tr></thead>
+      <tbody id="countBody"></tbody>
+    </table>
+  </section>
+
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <script>
+    const dataUrl='data.csv', stealsUrl='all_steals.csv', gamesUrl='game_info.csv';
+    let dataRows=[], stealRows=[], gameRows=[];
+
+    function parseHM(d,t){if(!d||!t)return null;const [m,day,y]=d.split('/').map(s=>s.trim());let [h,rest]=t.split(':').map(s=>s.trim());let [mm,suf]=rest.split(' ').map(s=>s.trim());h=parseInt(h,10);if(suf==='PM'&&h<12)h+=12;if(suf==='AM'&&h===12)h=0;return new Date(`${y}-${m.padStart(2,'0')}-${day.padStart(2,'0')}T${h.toString().padStart(2,'0')}:${mm}:00`);}  
+    function parseDur(d){if(!d)return 0;const [h,m]=d.split(':').map(x=>parseInt(x,10));return((h||0)*60+(m||0))*60000;}  
+    function cleanName(n){return typeof n==='string'?n.replace(/\s*\d.*$/,'').trim():'';}  
+    function normalizeTeam(n){return typeof n==='string'?n.replace(/Southern Maryland Blue Crabs/,'South Maryland Blue Crabs'):n;}  
+    function mergeData(){const idx=Object.fromEntries(gameRows.map(g=>[g.gameid,g]));let m=[];stealRows.forEach(s0=>{let s={...s0,player:cleanName(s0.player)};s.batting_team=normalizeTeam(s.batting_team);s.defense_team=normalizeTeam(s.defense_team);const gi=idx[s.gameid];if(!gi)return;const st=parseHM(gi.date,gi.start_time);if(!st)return;const e1=parseHM(gi.date,gi.end_time),e2=new Date(st.getTime()+parseDur(gi.duration));const et=(e1&&e1>e2?e1:e2);if(!et)return;const surv=dataRows.filter(r=>{const dt=new Date(r.LocalDateTime);return dt>=st&&dt<=et&&((s.defense_team===r.HomeNameFull&&s.batting_team===r.AwayNameFull)||(s.defense_team===r.AwayNameFull&&s.batting_team===r.HomeNameFull));});if(!surv.length)return;const i=surv.findIndex(r=>r.Inning===s.inning&&(r['Top/Bottom']==='Top'?'top':'bottom')===s.half&&+r.Balls===+s.balls&&+r.Strikes===+s.strikes);let mr=null;if(i>=0){mr=surv.slice(i+1).find(r=>r.PopTime&&r.PopTime.trim())||surv.slice(i+1).filter(r=>r.Pitcher===surv[i].Pitcher&&r.Catcher===surv[i].Catcher).pop()||null;}if(!mr){const ir=surv.filter(r=>r.Inning===s.inning&&(r['Top/Bottom']==='Top'?'top':'bottom')===s.half);mr=ir.pop()||null;}if(mr)m.push({...s,...mr});});return m;}  
+    function makeSortable(id,body){document.querySelectorAll(`#${id} th`).forEach((th,i)=>th.onclick=()=>{const tb=document.getElementById(body),rows=Array.from(tb.rows),asc=th.asc=!th.asc;rows.sort((a,b)=>{const x=a.cells[i].innerText,y=b.cells[i].innerText,nx=parseFloat(x),ny=parseFloat(y),cmp=(isNaN(nx)||isNaN(ny)?x.localeCompare(y):nx-ny);return asc?cmp:-cmp;});tb.innerHTML='';rows.forEach(r=>tb.appendChild(r));});}
+
+    function populateStatsFilters(merged){const B=document.getElementById('battingTeamFilter');new Set(merged.map(r=>r.batting_team)).forEach(t=>B.append(new Option(t,t)));['defenseTeamFilter','pitcherFilter','catcherFilter'].forEach(id=>{const sel=document.getElementById(id);new Set(merged.map(r=>id==='defenseTeamFilter'?r.defense_team:id==='pitcherFilter'?r.Pitcher:r.Catcher)).forEach(v=>sel.append(new Option(v,v)));});}
+    function populateCountFilters(){const Bc=document.getElementById('battingTeamCountFilter');new Set(stealRows.map(s=>s.batting_team)).forEach(t=>Bc.append(new Option(t,t)));}
+
+    function renderStats() {
+      const B = document.getElementById('battingTeamFilter').value;
+      const D = document.getElementById('defenseTeamFilter').value;
+      const P = document.getElementById('pitcherFilter').value;
+      const C = document.getElementById('catcherFilter').value;
+      const mn = parseInt(document.getElementById('minAttempts').value) || 0;
+      const mode = document.getElementById('viewMode').value;
+
+      // Show/hide stats-only filters based on batting team selection
+      document.querySelectorAll('.stats-only').forEach(el =>
+        (el.style.display = B ? 'flex' : 'none')
+      );
+
+      let src;
+      // Use raw steals for Steal % mode when pitcher & catcher filters are All
+      if (mode === 'steal' && !P && !C) {
+        // raw steals, apply batting team filter if set
+        src = stealRows
+          .filter(r => !B || r.batting_team === B)
+          .map(s => ({ player: cleanName(s.player), result: s.result }));
+      } else {
+        src = mergeData()
+          .filter(r =>
+            (!B || r.batting_team === B) &&
+            (!D || r.defense_team === D) &&
+            (!P || r.Pitcher === P) &&
+            (!C || r.Catcher === C)
+          )
+          .map(r => ({ player: cleanName(r.player), result: r.result, Catcher: r.Catcher }));
+      }
+
+      const stats = {};
+      src.forEach(r => {
+        const key = mode === 'steal' ? r.player : r.Catcher;
+        stats[key] ??= { SB: 0, CS: 0 };
+        stats[key][r.result === 'SB' ? 'SB' : 'CS']++;
+      });
+
+      const rowsData = Object.entries(stats)
+        .map(([k, v]) => {
+          const total = v.SB + v.CS;
+          const pct = total
+            ? ((mode === 'steal' ? v.SB : v.CS) / total * 100).toFixed(1) + '%'
+            : '-';
+          return [k, v.SB, v.CS, pct];
+        })
+        .filter(r => r[1] + r[2] >= mn)
+        .sort((a, b) => parseFloat(b[3]) - parseFloat(a[3]));
+
+      const header = mode === 'steal'
+        ? ['Runner', 'SB', 'CS', 'SB%']
+        : ['Catcher', 'SB', 'CS', 'Caught%'];
+      document.getElementById('tableHeader').innerHTML =
+        header.map(h => `<th>${h}</th>`).join('');
+
+      document.getElementById('tableBody').innerHTML =
+        rowsData
+          .map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td></tr>`)
+          .join('');
+
+      makeSortable('statsTable', 'tableBody');
+      document.getElementById('note').innerText =
+        (!P && !C && mode === 'steal')
+          ? ''
+          : (P || C)
+          ? 'Note: filtering may limit data comparisons.'
+          : '';
+    }
+    
+ function renderCount(){
+      const B = document.getElementById('battingTeamCountFilter').value;
+      if (!B) return;
+      const allCounts = [...new Set(stealRows.map(s => `${s.balls}-${s.strikes}`))]
+        .sort((a,b)=>{const [aB,aS]=a.split('-').map(Number),[bB,bS]=b.split('-').map(Number);return aB!==bB?aB-bB:aS-bS;});
+
+      const playerStats = {};
+      stealRows.filter(s=>s.batting_team===B).forEach(s=>{
+        const p=cleanName(s.player), cnt=`${s.balls}-${s.strikes}`;
+        playerStats[p]=playerStats[p]||{};
+        playerStats[p][cnt]=playerStats[p][cnt]||0;
+        playerStats[p][cnt]++;
+      });
+
+      // compute max
+      let maxVal=0;
+      Object.values(playerStats).forEach(counts=>{
+        Object.values(counts).forEach(v=>{if(v>maxVal)maxVal=v;});
+      });
+
+      // header
+      const hdr=['Runner',...allCounts,'Total'];
+      document.getElementById('countHeader').innerHTML=hdr.map(h=>`<th>${h}</th>`).join('');
+
+      // body
+      let html='';
+      Object.entries(playerStats).forEach(([p,counts])=>{
+        let tot=0;
+        html+=`<tr><td>${p}</td>`;
+        allCounts.forEach(cnt=>{
+          const v=counts[cnt]||0;
+          tot+=v;
+          const ratio = v / maxVal;
+          // color from white (0) to red (max)
+          const gb = Math.round(255 * (1 - ratio));
+html += `<td style="background:rgb(255,${gb},${gb})">${v}</td>`;
+        });
+        html+=`<td>${tot}</td></tr>`;
+      });
+      const teamTotals = allCounts.map(cnt =>
+    Object.values(playerStats).reduce((acc, counts) => acc + (counts[cnt] || 0), 0)
+  );
+  const teamSum = teamTotals.reduce((a, b) => a + b, 0);
+
+  // find the max for the team row alone
+  const teamMax = Math.max(...teamTotals);
+
+  html += `<tr><td><strong>Team Total</strong></td>`;
+  teamTotals.forEach(v => {
+    const ratio = v / teamMax;               // use teamMax here
+    const gb = Math.round(255 * (1 - ratio)); 
+    html += `<td style="background:rgb(255,${gb},${gb})"><strong>${v}</strong></td>`;
+  });
+  html += `<td><strong>${teamSum}</strong></td></tr>`;
+
+      document.getElementById('countBody').innerHTML=html;
+      makeSortable('countTable','countBody');
+    }
+    document.getElementById('btnStats').onclick=()=>{document.getElementById('statsSection').classList.remove('hidden');document.getElementById('countSection').classList.add('hidden');};
+    document.getElementById('btnCount').onclick=()=>{document.getElementById('countSection').classList.remove('hidden');document.getElementById('statsSection').classList.add('hidden');};
+
+    Promise.all([
+      fetch(dataUrl).then(r=>r.text()).then(t=>Papa.parse(t,{header:true}).data),
+      fetch(gamesUrl).then(r=>r.text()).then(t=>Papa.parse(t,{header:true}).data),
+      fetch(stealsUrl).then(r=>r.text()).then(t=>Papa.parse(t,{header:true}).data)
+    ]).then(([d,g,s])=>{dataRows=d;gameRows=g;stealRows=s;dataRows.forEach(r=>{r.HomeNameFull=normalizeTeam(r.HomeNameFull);r.AwayNameFull=normalizeTeam(r.AwayNameFull);});stealRows.forEach(s=>{s.batting_team=normalizeTeam(s.batting_team);s.defense_team=normalizeTeam(s.defense_team);});const merged=mergeData();populateStatsFilters(merged);populateCountFilters();['battingTeamFilter','defenseTeamFilter','pitcherFilter','catcherFilter','minAttempts','viewMode'].forEach(id=>document.getElementById(id).addEventListener('change',renderStats));document.getElementById('battingTeamCountFilter').addEventListener('change',renderCount);renderStats();renderCount();});
+  </script>
+<script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-analytics.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
+
+  // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyBgBqrrRBB1vvAnQ9mNBt9Vq6p2NWeKYZw",
+    authDomain: "revs-2c987.firebaseapp.com",
+    projectId: "revs-2c987",
+    storageBucket: "revs-2c987.firebasestorage.app",
+    messagingSenderId: "181256684157",
+    appId: "1:181256684157:web:a9e1c5dfd767658e2ba714",
+    measurementId: "G-2050889X0C"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+  firebase.initializeApp(firebaseConfig);
+
+</script>
+
+
+</body>
+</html>

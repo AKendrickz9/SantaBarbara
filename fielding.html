@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Interactive Fielder Positions with Filters & Park Shapes</title>
+<style>
+    body { margin: 0; background: #f0f0f0; font-family: sans-serif; }
+    header { background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    header nav ul { display: flex; list-style: none; margin: 0; padding: 10px 20px; }
+    header nav ul li { margin-right: 20px; }
+    header nav ul li a { text-decoration: none; color: #333; font-weight: bold; }
+    header nav ul li a.active { color: #007bff; }
+    #container { display: flex; height: calc(100vh - 52px); }
+    #sidebar { width: 250px; padding: 20px; background: #fff; box-shadow: 2px 0 5px rgba(0,0,0,0.1); overflow-y: auto; }
+    #sidebar h2 { margin-top: 0; font-size: 1.2rem; }
+    #controls { display: flex; flex-direction: column; gap: 15px; }
+    #controls label { display: flex; flex-direction: column; font-size: 0.9rem; }
+    #controls select, #controls input { margin-top: 5px; padding: 6px; font-size: 0.9rem; }
+    #main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 20px; }
+    #title { font-size: 1.5rem; margin-bottom: 10px; }
+    canvas { border: 1px solid #999; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav id="menu">
+      <ul>
+        <li><a href="index.html">Home</a></li>
+                            <li><a href="schedule.html" >Standings</a></li>
+
+                    <li><a href="schedule.html" >Standings</a></li>
+
+                          <li><a href="games.html">Games</a></li>
+
+        <li><a href="leaderboards.html">Leaderboards</a></li>
+        <li><a href="park-factors.html">Park Factors</a></li>
+        <li><a href="fielding.html" class="active">Fielding</a></li>
+                <li><a href="stolen-bases.html" >Base Running</a></li>
+                            <li><a href="dong.html">Would it Dong?</a></li>
+
+  
+    </ul>
+    </nav>
+  </header>
+  <div id="container">
+    <div id="sidebar">
+      <h2>Filters</h2>
+      <div id="controls">
+        <label>Ballpark:
+          <select id="parkSelect"></select>
+        </label>
+        <label>Pitcher Throws:
+          <select id="pitcherSideSelect"></select>
+        </label>
+        <label>Batter Side:
+          <select id="batterSideSelect"></select>
+        </label>
+        <label>Fielding Team:
+          <select id="fieldingTeamSelect"></select>
+        </label>
+        <label>Batting Team:
+          <select id="battingTeamSelect"></select>
+        </label>
+        <label>Pitcher:
+          <input id="pitcherInput" list="pitcherList">
+          <datalist id="pitcherList"></datalist>
+        </label>
+        <label>Batter:
+          <input id="batterInput" list="batterList">
+          <datalist id="batterList"></datalist>
+        </label>
+      </div>
+    </div>
+    <div id="main">
+      <div id="title">Average player position at pitch release</div>
+      <canvas id="field" width="700" height="500"></canvas>
+    </div>
+  </div>
+
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  <script>
+    // DOM refs
+    const cvs = document.getElementById('field'), ctx = cvs.getContext('2d');
+    const parkSelect = document.getElementById('parkSelect');
+    const pitcherSideSelect = document.getElementById('pitcherSideSelect');
+    const batterSideSelect = document.getElementById('batterSideSelect');
+    const fieldingTeamSelect = document.getElementById('fieldingTeamSelect');
+    const battingTeamSelect = document.getElementById('battingTeamSelect');
+    const pitcherInput = document.getElementById('pitcherInput');
+    const batterInput = document.getElementById('batterInput');
+    const pitcherList = document.getElementById('pitcherList');
+    const batterList = document.getElementById('batterList');
+
+    // Park definitions
+    const parks = {
+      default:{leftFoul:325,leftCenter:362.5,center:400,rightCenter:362.5,rightFoul:325},
+      'Meritus Park':{leftFoul:346,leftCenter:366.5,center:400,rightCenter:380,rightFoul:325},
+      'Wellspan Park':{leftFoul:300,leftCenter:352.5,center:405,rightCenter:365.5,rightFoul:326},
+      'CaroMont Health Park':{leftFoul:315,leftCenter:361,center:400,rightCenter:367,rightFoul:325},
+      'Penn Medicine Park':{leftFoul:320,leftCenter:409,center:400,rightCenter:363,rightFoul:300},
+      'Fairfield Properties BallPark':{leftFoul:325,leftCenter:362.5,center:400,rightCenter:362.5,rightFoul:325},
+      'SIUH Community Park':{leftFoul:320,leftCenter:355,center:390,rightCenter:354,rightFoul:318},
+      'GoMart BallPark':{leftFoul:330,leftCenter:365,center:400,rightCenter:360,rightFoul:320},
+      'Truist Point':{leftFoul:336,leftCenter:363,center:400,rightCenter:366,rightFoul:339},
+      'Legends Field':{leftFoul:320,leftCenter:360.5,center:401,rightCenter:359.5,rightFoul:318},
+      'Regency Furniture Stadium':{leftFoul:310,leftCenter:355,center:400,rightCenter:362.5,rightFoul:325}
+    };
+    // Map HomeTeam code to park
+    const teamParkMap = {
+      'LAN'     : 'Penn Medicine Park',
+      'SMD'     : 'Regency Furniture Stadium',
+      'YOR'     : 'Wellspan Park',
+      'HAG_FLY' : 'Meritus Park',
+      'LI'      : 'Fairfield Properties BallPark',
+      'GAS'     : 'CaroMont Health Park',
+      'STA_YAN' : 'SIUH Community Park',
+      'HP'      : 'Truist Point',
+      'LEX_LEG' : 'Legends Field',
+      'WES_POW' : 'GoMart BallPark'
+    };
+
+    const extraCorner=55, extraCenter=28.5;
+    const margin=20, availHeight=cvs.height - margin*2;
+    const origin={x:cvs.width/2,y:cvs.height-margin};
+    let merged=[];
+
+    function toPx({x,z}, scale){ return { x: origin.x + z*scale, y: origin.y - x*scale }; }
+
+    function drawField(scale, currentPark){
+      ctx.clearRect(0,0,cvs.width,cvs.height);
+      // Infield diamond
+      const infield = [
+        {x:0,z:0},
+        {x:90*Math.cos(Math.PI/4),z:90*Math.sin(Math.PI/4)},
+        {x:90*Math.SQRT2,z:0},
+        {x:90*Math.cos(Math.PI/4),z:-90*Math.sin(Math.PI/4)}
+      ];
+      ctx.strokeStyle='#444'; ctx.lineWidth=2;
+      ctx.beginPath(); infield.forEach((pt,i)=>{
+        const p=toPx(pt,scale);
+        i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);
+      }); ctx.closePath(); ctx.stroke();
+      ctx.fillStyle='#fff'; infield.forEach(pt=>{
+        const p=toPx(pt,scale);
+        ctx.fillRect(p.x-6,p.y-6,12,12);
+      });
+
+      // Infield boundary
+      const rCorner=90+extraCorner;
+      const rCenter=90*Math.SQRT2+extraCenter;
+      ctx.strokeStyle='#aaa'; ctx.lineWidth=2;
+      ctx.beginPath();
+      for(let deg=-45;deg<=45;deg++){
+        const rad=deg*Math.PI/180;
+        const t=1 - Math.abs(deg)/45;
+        const r=rCorner + t*(rCenter - rCorner);
+        const pt=toPx({x:r*Math.cos(rad),z:r*Math.sin(rad)},scale);
+        deg===-45?ctx.moveTo(pt.x,pt.y):ctx.lineTo(pt.x,pt.y);
+      }
+      ctx.stroke();
+
+      // Foul lines
+      const ang=Math.PI/4;
+      const home=toPx({x:0,z:0},scale);
+      const lf=toPx({x:currentPark.leftFoul*Math.cos(ang),z:-currentPark.leftFoul*Math.sin(ang)},scale);
+      const rf=toPx({x:currentPark.rightFoul*Math.cos(ang),z:currentPark.rightFoul*Math.sin(ang)},scale);
+      ctx.strokeStyle='#888'; ctx.lineWidth=1.5;
+      ctx.beginPath();
+      ctx.moveTo(home.x,home.y); ctx.lineTo(lf.x,lf.y);
+      ctx.moveTo(home.x,home.y); ctx.lineTo(rf.x,rf.y);
+      ctx.stroke();
+
+      // Outfield arc
+      const angles=[-45,-22.5,0,22.5,45];
+      const radii=[currentPark.leftFoul,currentPark.leftCenter,currentPark.center,currentPark.rightCenter,currentPark.rightFoul];
+      ctx.strokeStyle='#555'; ctx.lineWidth=3;
+      ctx.beginPath();
+      angles.forEach((deg,i)=>{
+        const rad=deg*Math.PI/180;
+        const r=radii[i];
+        const pt=toPx({x:r*Math.cos(rad),z:r*Math.sin(rad)},scale);
+        i?ctx.lineTo(pt.x,pt.y):ctx.moveTo(pt.x,pt.y);
+      });
+      ctx.stroke();
+
+      // Label fences
+      ctx.fillStyle='#000'; ctx.font='12px sans-serif';
+      angles.forEach((deg,i)=>{
+        const rad=deg*Math.PI/180;
+        const r=radii[i];
+        const pt=toPx({x:r*Math.cos(rad),z:r*Math.sin(rad)},scale);
+        ctx.fillText(Math.round(r)+"'",pt.x + ((deg<0)?-20:5),pt.y + 15);
+      });
+    }
+
+    // Compute and draw average positions
+    const positions=['1B','2B','3B','SS','LF','CF','RF'];
+    function drawAverages(scale){
+      // apply filters
+      const filtr = merged.filter(r=>
+        (pitcherSideSelect.value==='ALL' || r.PitcherThrows===pitcherSideSelect.value) &&
+        (batterSideSelect.value==='ALL' || r.BatterSide===batterSideSelect.value) &&
+        (fieldingTeamSelect.value==='ALL' || [r.HomeNameFull,r.AwayNameFull].includes(fieldingTeamSelect.value)) &&
+        (battingTeamSelect.value==='ALL' || r.BatterTeam===battingTeamSelect.value) &&
+        (!pitcherInput.value || r.Pitcher===pitcherInput.value) &&
+        (!batterInput.value || r.Batter===batterInput.value) &&
+        (parkSelect.value==='default' || teamParkMap[r.HomeTeam]===parkSelect.value)
+      );
+      const sums = {};
+      positions.forEach(p=>{ sums[p]={x:0,z:0,c:0}; });
+      filtr.forEach(r=>positions.forEach(p=>{
+        const x = parseFloat(r[p+'_PositionAtReleaseX']);
+        const z = parseFloat(r[p+'_PositionAtReleaseZ']);
+        if(!isNaN(x)&&!isNaN(z)){ sums[p].x+=x; sums[p].z+=z; sums[p].c++; }
+      }));
+      positions.forEach(p=>{
+        const s=sums[p];
+        if(s.c>0){
+          const avg={x:s.x/s.c, z:s.z/s.c};
+          const pt=toPx(avg,scale);
+          ctx.fillStyle='rgba(50,150,50,0.8)'; ctx.beginPath(); ctx.arc(pt.x,pt.y,8,0,2*Math.PI); ctx.fill();
+          ctx.fillStyle='#000'; ctx.font='bold 12px sans-serif'; ctx.fillText(p,pt.x+10,pt.y-10);
+        }
+      });
+    }
+
+    function render(){
+      // pick park and scale dynamically
+      const currentPark = parks[parkSelect.value] || parks.default;
+      const scale = availHeight / currentPark.center;
+      drawField(scale, currentPark);
+      drawAverages(scale);
+    }
+
+      function initFilters(){
+      const sets={ps:new Set(),bs:new Set(),ft:new Set(),bt:new Set(),pi:new Set(),ba:new Set()};
+      merged.forEach(r=>{
+        sets.ps.add(r.PitcherThrows);
+        sets.bs.add(r.BatterSide);
+        sets.ft.add(r.HomeNameFull); sets.ft.add(r.AwayNameFull);
+        sets.bt.add(r.BatterTeam);
+        sets.pi.add(r.Pitcher);
+        sets.ba.add(r.Batter);
+      });
+      // Populate parkSelect
+      parkSelect.innerHTML = '';
+      Object.keys(parks).forEach(key => {
+        const label = key === 'default' ? '-- All Parks --' : key;
+        parkSelect.add(new Option(label, key));
+      });
+      // Populate throws
+      pitcherSideSelect.innerHTML = '<option value="ALL">All Throws</option>';
+      [...sets.ps].sort().forEach(v=> pitcherSideSelect.add(new Option(v,v)));
+      // Populate batter side
+      batterSideSelect.innerHTML = '<option value="ALL">All Batter Sides</option>';
+      [...sets.bs].sort().forEach(v=> batterSideSelect.add(new Option(v,v)));
+      // Populate fielding team
+      fieldingTeamSelect.innerHTML = '<option value="ALL">All Fielding Teams</option>';
+      [...sets.ft].sort().forEach(v=> fieldingTeamSelect.add(new Option(v,v)));
+      // Populate batting team
+      battingTeamSelect.innerHTML = '<option value="ALL">All Batting Teams</option>';
+      [...sets.bt].sort().forEach(v=> battingTeamSelect.add(new Option(v,v)));
+      // Populate datalists
+      pitcherList.innerHTML = '';
+      [...sets.pi].sort().forEach(v=> pitcherList.append(new Option(v)));
+      batterList.innerHTML = '';
+      [...sets.ba].sort().forEach(v=> batterList.append(new Option(v)));
+    }
+
+    function loadAll(){
+      Papa.parse('data.csv',{download:true,header:true,complete:res1=>{
+        const data=res1.data;
+        Papa.parse('fielder_positions.csv',{download:true,header:true,complete:res2=>{
+          const fld=res2.data;
+          const idx=Object.fromEntries(data.map(d=>[d.PitchUID,d]));
+          merged=fld.map(f=>({...idx[f.PitchUID],...f}));
+          initFilters(); render();
+        }});
+      }});
+    }
+
+    // Attach listeners
+    [parkSelect,pitcherSideSelect,batterSideSelect,fieldingTeamSelect,battingTeamSelect].forEach(el=>el.addEventListener('change',render));
+    pitcherInput.addEventListener('input',render);
+    batterInput.addEventListener('input',render);
+
+    // Kickoff
+    loadAll();
+  </script>
+  <script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-analytics.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
+
+  // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyBgBqrrRBB1vvAnQ9mNBt9Vq6p2NWeKYZw",
+    authDomain: "revs-2c987.firebaseapp.com",
+    projectId: "revs-2c987",
+    storageBucket: "revs-2c987.firebasestorage.app",
+    messagingSenderId: "181256684157",
+    appId: "1:181256684157:web:a9e1c5dfd767658e2ba714",
+    measurementId: "G-2050889X0C"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+
+  const auth = firebase.auth();
+
+  
+</script>
+</body>
+</html>

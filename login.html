@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>eRevs User Login</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .container { max-width: 400px; margin: auto; }
+    h1 { text-align: center; }
+    label { display: block; margin-top: 12px; }
+    input[type="text"], input[type="password"] {
+      width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box;
+    }
+    button { margin-top: 10px; padding: 8px 12px; cursor: pointer; }
+    #message { margin-top: 10px; }
+    .success { color: green; }
+    .error { color: red; }
+  </style>
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>eRevs User Login</h1>
+    <label for="username">Username (no domain):</label>
+    <input type="text" id="username" placeholder="e.g. iChurchill" />
+
+    <label for="password">Password:</label>
+    <input type="password" id="password" placeholder="Your password" />
+
+    <button id="loginBtn">Login</button>
+    <button id="logoutBtn" style="display:none;">Logout</button>
+
+    <div id="message"></div>
+  </div>
+
+  <script>
+    // TODO: Replace with your Firebase project configuration
+    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyBgBqrrRBB1vvAnQ9mNBt9Vq6p2NWeKYZw",
+  authDomain: "revs-2c987.firebaseapp.com",
+  projectId: "revs-2c987",
+  storageBucket: "revs-2c987.firebasestorage.app",
+  messagingSenderId: "181256684157",
+  appId: "1:181256684157:web:a9e1c5dfd767658e2ba714",
+  measurementId: "G-2050889X0C"
+};
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+
+    const loginBtn = document.getElementById('loginBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const messageDiv = document.getElementById('message');
+
+    loginBtn.addEventListener('click', () => {
+      const user = document.getElementById('username').value.trim();
+      const pwd = document.getElementById('password').value;
+      messageDiv.textContent = '';
+      if (!user || !pwd) {
+        messageDiv.textContent = 'Please enter both username and password.';
+        messageDiv.className = 'error';
+        return;
+      }
+      const email = `${user}@eRevs.com`;
+      auth.signInWithEmailAndPassword(email, pwd)
+        .then(cred => {
+          messageDiv.innerHTML = `Welcome, <strong>${cred.user.email}</strong>!`;
+          messageDiv.className = 'success';
+          loginBtn.style.display = 'none';
+          logoutBtn.style.display = 'inline-block';
+          window.location.href = 'index.html';
+
+        })
+        .catch(err => {
+          messageDiv.textContent = err.message;
+          messageDiv.className = 'error';
+        });
+    });
+
+    logoutBtn.addEventListener('click', () => {
+      auth.signOut().then(() => {
+        messageDiv.textContent = 'You have been logged out.';
+        messageDiv.className = 'success';
+        loginBtn.style.display = 'inline-block';
+        logoutBtn.style.display = 'none';
+        document.getElementById('username').value = '';
+        document.getElementById('password').value = '';
+      });
+    });
+
+    // Handle auth state changes
+    auth.onAuthStateChanged(user => {
+      if (user) {
+        messageDiv.innerHTML = `Logged in as <strong>${user.email}</strong>`;
+        messageDiv.className = 'success';
+        loginBtn.style.display = 'none';
+        logoutBtn.style.display = 'inline-block';
+      } else {
+        loginBtn.style.display = 'inline-block';
+        logoutBtn.style.display = 'none';
+      }
+    });
+  </script>
+</body>
+</html>
