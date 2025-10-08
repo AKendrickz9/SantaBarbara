@@ -722,14 +722,7 @@ Papa.parse('./data.csv', {
     firebase.initializeApp(firebaseConfig);
   </script>
   <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const auth = firebase.auth();
-      auth.onAuthStateChanged(user => {
-        if (!user) {
-          window.location.href = 'login.html';
-        }
-      });
-    });
+
 
     // MENU TOGGLE LOGIC
     const hamburger = document.getElementById('hamburger-btn');
