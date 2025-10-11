@@ -237,6 +237,7 @@ Papa.parse(DATA_CSV, {
       PAofInning:     r.PAofInning,
       PitchNo:        r.PitchNo,
       Batter:         r.Batter,
+      Catcher:         r.Catcher,
       Pitcher:        r.Pitcher,
       AwayNameFull:   r.AwayNameFull,
       HomeNameFull:   r.HomeNameFull,
@@ -266,6 +267,11 @@ Papa.parse(DATA_CSV, {
       Extension:   r.Extension,
       VertRelAngle:   r.VertRelAngle,
       HorzRelAngle:   r.HorzRelAngle,
+      VertApprAngle:  r.VertApprAngle,
+      HorzApprAngle:  r.HorzApprAngle,
+        Extension:      r.Extension,
+        Direction:      r.Direction,
+
       // …only these fields, nothing more…
     });
   },
